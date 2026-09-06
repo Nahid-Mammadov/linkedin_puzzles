@@ -10,7 +10,9 @@ A local Chrome extension that reads LinkedIn's delivered puzzle solutions and su
 
 After an update, reload the extension and the game tab. The panel shows the running version. Guest boards have no member save record, so request completion requires a signed-in session. Incognito works when the extension is enabled there and LinkedIn is signed in.
 
-If puzzle data is present but the initial save request was missed, the extension reloads once with capture attached and automatically resumes the solve. If the request is still unavailable, it stops with a specific error rather than looping or entering moves. Recovery, resume, and loop prevention have automated coverage. On September 6, the affected live Wend tab had puzzle data but no captured saves; reloading recovered the contract, and v0.7.2 then completed its initially unsolved board at 0:02 with persisted completion after reload. The automatic missing-contract branch was tested in the runtime harness, not induced again on that live board.
+If puzzle data is present but no native save has been captured, the extension asks LinkedIn's own action runner to execute just the page-provided `updateGameState` request. It does not run the surrounding lifecycle actions, change visibility, or enter a board move. The normal request builder then submits the completed state. A single reload remains a fallback if the native action cannot be found; the extension stops if recovery fails.
+
+v0.7.3 was verified using only native Chrome controls on an initially unsolved Tango board: capture was empty before solving, the tab remained visible, and the completed board persisted at 0:02 after automatic reload. Zip's daily board had already been completed during diagnosis, so the new trigger was not revalidated on an unsolved Zip board. The trigger relies on LinkedIn's React action-runner structure and fails closed if those relationships change.
 
 ## Request paths
 

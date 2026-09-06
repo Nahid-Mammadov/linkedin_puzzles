@@ -109,11 +109,18 @@
 
   async function submitSdui(game, url, startedAt) {
     let context;
+    let requestedSave = false;
     for (let attempt = 0; attempt < 80; attempt += 1) {
       context = await message("lls-request-context");
       assertPage(url);
       if (context.game && context.template) break;
-      if (context.game && attempt >= 8 && !context.template) break;
+      if (context.game && !context.template && !requestedSave) {
+        requestedSave = true;
+        setStatus("Requesting LinkedIn's save contract…", "working");
+        await message("lls-request-native-save");
+        assertPage(url);
+      }
+      if (context.game && attempt >= 16 && !context.template) break;
       await delay(250, url);
     }
     if (!context?.game) throw new Error("LinkedIn's puzzle data is unavailable. Open the game board and retry.");

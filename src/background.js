@@ -57,6 +57,45 @@ function capturePageGame(gameName) {
   return null;
 }
 
+// Compile only the page-provided save action, not the surrounding lifecycle
+// actions (which pause timers, cancel jobs, and require a prior board move).
+async function requestNativeGameSave() {
+  const route = location.pathname.match(/^\/games\/(?:view\/)?([^/]+)/)?.[1];
+  const selectors = { queens: "#queens-game-board", tango: "#tango-cell-0", zip: "[data-cell-idx]", patches: "[data-cell-idx]", wend: "[data-game-content-root]" };
+  const board = selectors[route] && document.querySelector(selectors[route]);
+  if (!board) return false;
+  let fiber = board[Object.keys(board).find(key => key.startsWith("__reactFiber$"))];
+  function findSave(value, depth = 0) {
+    if (!value || typeof value !== "object" || depth > 20) return null;
+    if (value.$type === "proto.sdui.actions.core.ServerRequest"
+      && value.value?.requestId === "updateGameState") return value;
+    for (const child of Object.values(value)) {
+      const action = findSave(child, depth + 1);
+      if (action) return action;
+    }
+    return null;
+  }
+  for (let depth = 0; fiber && depth < 100; depth++, fiber = fiber.return) {
+    const lifecycle = fiber.memoizedProps?.onDisappear;
+    const action = findSave(lifecycle);
+    if (!action) continue;
+    let previous;
+    for (let hook = fiber.memoizedState, count = 0; hook && count < 300; hook = hook.next, count++) {
+      const memo = hook.memoizedState;
+      if (Array.isArray(memo) && Array.isArray(memo[1]) && memo[1].includes(lifecycle)
+        && typeof memo[0]?.func === "function" && typeof previous?.[0] === "function"
+        && memo[1].includes(previous[0])) {
+        const execute = previous[0]({ actions: [action] });
+        if (typeof execute !== "function") return false;
+        await execute();
+        return true;
+      }
+      previous = memo;
+    }
+  }
+  return false;
+}
+
 function recordSessionRequest(tabId, entry) {
   const log = sessionCapture.get(tabId) || [];
   log.push({ capturedAt: Date.now(), ...entry });
@@ -380,6 +419,14 @@ async function handleMessage(message, sender) {
 
   if (message?.type === "lls-debug-requests") {
     return { ok: true, requests: await capturedRequests(tabId, { includePrevious: Boolean(message.all) }) };
+  }
+
+  if (message?.type === "lls-request-native-save") {
+    await startCapture(tabId, sender.url);
+    const results = await chrome.scripting.executeScript({
+      target: { tabId, frameIds: [sender.frameId || 0] }, world: "MAIN", func: requestNativeGameSave,
+    });
+    return { ok: true, triggered: results?.[0]?.result === true };
   }
 
   if (message?.type === "lls-request-context") {
