@@ -10,6 +10,7 @@
     zip: "Zip", patches: "Patches", wend: "Wend", "mini-sudoku": "Mini Sudoku" };
   const voyagerIds = { pinpoint: "1", crossclimb: "2", "mini-sudoku": "7" };
   const pendingKey = "llsPendingRequest";
+  const recoveryKey = "llsRequestRecovery";
   let panel, status, solveButton;
   let solving = false;
   let currentUrl = location.href;
@@ -112,10 +113,14 @@
       context = await message("lls-request-context");
       assertPage(url);
       if (context.game && context.template) break;
+      if (context.game && attempt >= 8 && !context.template) break;
       await delay(250, url);
     }
-    if (!context?.game || !context?.template) {
-      throw new Error("LinkedIn's puzzle or initial save contract is unavailable. Open the board and retry.");
+    if (!context?.game) throw new Error("LinkedIn's puzzle data is unavailable. Open the game board and retry.");
+    if (!context.template) {
+      const error = new Error("LinkedIn's initial save request was not captured, even after reloading. No save was sent.");
+      error.code = "MISSING_SAVE_CONTRACT";
+      throw error;
     }
     await delay(Math.max(0, 2000 - (Date.now() - startedAt)), url);
     const body = requests[game + "Save"](context.game, context.template, Date.now() - startedAt);
@@ -125,7 +130,7 @@
     if (path !== `/games/${game}/results/`) throw new Error("Save response belongs to another game.");
   }
 
-  async function solve() {
+  async function solve(recovered = false) {
     if (solving) return;
     if (completed()) { setStatus("This game is already completed.", "success"); return; }
     const game = currentGame();
@@ -145,6 +150,12 @@
       setStatus("Save accepted. Reloading to verify…", "working");
       location.reload();
     } catch (error) {
+      if (error.code === "MISSING_SAVE_CONTRACT" && !recovered && location.href === url) {
+        sessionStorage.setItem(recoveryKey, JSON.stringify({ game, path: location.pathname, savedAt: Date.now() }));
+        setStatus("Recovering LinkedIn's save request. Reloading and resuming…", "working");
+        location.reload();
+        return;
+      }
       setStatus(error.message || String(error), "error");
     } finally {
       solving = false;
@@ -204,7 +215,15 @@
     catch (error) { report.textContent = error.message; }
   });
   updatePanel();
-  void verifyPending();
+  let recovery;
+  try { recovery = JSON.parse(sessionStorage.getItem(recoveryKey)); } catch { /* Ignore malformed page storage. */ }
+  sessionStorage.removeItem(recoveryKey);
+  if (recovery?.game === currentGame() && recovery.path === location.pathname
+    && Date.now() - recovery.savedAt >= 0 && Date.now() - recovery.savedAt < 120000) {
+    void solve(true);
+  } else {
+    void verifyPending();
+  }
   const navigation = setInterval(() => {
     if (location.href === currentUrl) return;
     currentUrl = location.href;

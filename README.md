@@ -10,6 +10,8 @@ A local Chrome extension that reads LinkedIn's delivered puzzle solutions and su
 
 After an update, reload the extension and the game tab. The panel shows the running version. Guest boards have no member save record, so request completion requires a signed-in session. Incognito works when the extension is enabled there and LinkedIn is signed in.
 
+If puzzle data is present but the initial save request was missed, the extension reloads once with capture attached and automatically resumes the solve. If the request is still unavailable, it stops with a specific error rather than looping or entering moves. Recovery, resume, and loop prevention have automated coverage. On September 6, the affected live Wend tab had puzzle data but no captured saves; reloading recovered the contract, and v0.7.2 then completed its initially unsolved board at 0:02 with persisted completion after reload. The automatic missing-contract branch was tested in the runtime harness, not induced again on that live board.
+
 ## Request paths
 
 Pinpoint, Crossclimb, and Mini Sudoku use Voyager's game-save mutation with the exact game URN supplied by the page, including negative tutorial puzzle ids. A successful response must identify that same resource.
