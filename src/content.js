@@ -1,6 +1,9 @@
 (function startLinkedInPuzzleRequests() {
   "use strict";
-  if (globalThis.__linkedinRequestSolverLoaded) return;
+  if (globalThis.__linkedinRequestSolverLoaded) {
+    if (typeof globalThis.__linkedinRequestSolverLoaded === "function") globalThis.__linkedinRequestSolverLoaded();
+    return;
+  }
   globalThis.__linkedinRequestSolverLoaded = true;
   if (window.top === window && document.querySelector("iframe[src*='/games/view/']")) return;
 
@@ -19,10 +22,23 @@
     return location.pathname.match(/^\/games\/(?:view\/)?([^/]+)/)?.[1];
   }
 
+  function gameDocuments() {
+    const documents = [document];
+    for (let index = 0; index < documents.length && index < 8; index++) {
+      for (const frame of documents[index].querySelectorAll("iframe")) {
+        try {
+          const child = frame.contentDocument;
+          if (child && !documents.includes(child)) documents.push(child);
+        } catch { /* Cross-origin frames are not game data sources. */ }
+      }
+    }
+    return documents;
+  }
+
   function completed() {
     return /\/results\/?$/.test(location.pathname)
-      || [...document.querySelectorAll("a,button")].some((el) =>
-        !el.closest("#linkedin-logic-solver") && (el.textContent || "").trim() === "See results");
+      || gameDocuments().some(doc => [...doc.querySelectorAll("a,button")].some((el) =>
+        !el.closest("#linkedin-logic-solver") && (el.textContent || "").trim() === "See results"));
   }
 
   function setStatus(text, state = "idle") {
@@ -31,7 +47,13 @@
   }
 
   async function message(type, extra = {}) {
-    const response = await chrome.runtime.sendMessage({ type, ...extra });
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error("The extension is taking too long to respond. Reload the extension and this tab, then retry.")), 10000);
+    });
+    let response;
+    try { response = await Promise.race([chrome.runtime.sendMessage({ type, ...extra }), timeout]); }
+    finally { clearTimeout(timer); }
     if (!response?.ok) throw new Error(response?.error || "The extension could not read this game's data.");
     return response;
   }
@@ -47,17 +69,30 @@
 
   function localSources() {
     const retained = globalThis.LinkedInPuzzleBootstrap?.captureVisible?.() || [];
-    const live = [...document.querySelectorAll("script,code")].map((el) => el.textContent || "")
+    const live = gameDocuments().flatMap(doc => [...doc.querySelectorAll("script,code")]).map((el) => el.textContent || "")
       .filter((text) => text.length <= 4 * 1024 * 1024);
     return [...new Set([...retained, ...live])];
   }
 
   async function prepareVoyager(game, url) {
     let lastError;
-    for (let attempt = 0; attempt < 32; attempt += 1) {
+    let previousSources = [];
+    let nextBackgroundRead = 0;
+    let captured = [];
+    const deadline = Date.now() + 8000;
+    for (let attempt = 0; Date.now() < deadline; attempt += 1) {
       assertPage(url);
       const sources = localSources();
-      if (attempt > 0) sources.push(...(await message("lls-puzzle-sources")).sources);
+      if (attempt > 0 && Date.now() >= nextBackgroundRead) {
+        captured = (await message("lls-puzzle-sources")).sources;
+        nextBackgroundRead = Date.now() + 1000;
+      }
+      sources.push(...captured);
+      if (sources.length === previousSources.length && sources.every((source, i) => source === previousSources[i])) {
+        await delay(100, url);
+        continue;
+      }
+      previousSources = sources;
       try {
         const state = game === "pinpoint"
           ? { blueprintGameState: [parsers.parsePinpointSolutions(sources)[0]] }
@@ -70,9 +105,10 @@
       } catch (error) {
         lastError = error;
       }
-      await delay(250, url);
+      if (solving) setStatus("Waiting for LinkedIn to load the puzzle…", "working");
+      await delay(100, url);
     }
-    throw lastError;
+    throw lastError || new Error("LinkedIn has not loaded the puzzle data. Open the board and retry.");
   }
 
   function csrfToken() {
@@ -83,6 +119,7 @@
 
   async function sendSave(endpoint, body, headers, url) {
     assertPage(url);
+    setStatus("Saving completed puzzle…", "working");
     const response = await fetch(endpoint, {
       method: "POST", credentials: "include", headers: { ...headers, "csrf-token": csrfToken() },
       body: JSON.stringify(body), signal: AbortSignal.timeout(15000),
@@ -94,6 +131,7 @@
 
   async function submitVoyager(game, url, startedAt) {
     const { state, urn } = await prepareVoyager(game, url);
+    setStatus("Puzzle ready. Preparing save…", "working");
     const { queryId } = await message("lls-game-query-id");
     if (!queryId) throw new Error("LinkedIn's save-query identifier is unavailable.");
     if (game !== "pinpoint") await delay(Math.max(0, 2000 - (Date.now() - startedAt)), url);
@@ -148,8 +186,9 @@
     solveButton.disabled = true;
     try {
       csrfToken();
-      setStatus("Reading LinkedIn's solution…", "working");
-      await message("lls-capture-start");
+      setStatus("Loading puzzle data…", "working");
+      // Voyager can read retained page data without waiting for debugger setup.
+      if (!voyagerIds[game]) await message("lls-capture-start");
       if (voyagerIds[game]) await submitVoyager(game, url, startedAt);
       else await submitSdui(game, url, startedAt);
       assertPage(url);
@@ -196,6 +235,7 @@
   }
 
   function updatePanel() {
+    if (!panel.isConnected) document.documentElement.appendChild(panel);
     const game = currentGame();
     panel.hidden = !games[game];
     panel.querySelector(".lls__title").textContent = games[game] || "Puzzle Solver";
@@ -221,6 +261,7 @@
     try { report.textContent = JSON.stringify((await message("lls-debug-requests", { all: true })).requests, null, 2); }
     catch (error) { report.textContent = error.message; }
   });
+  globalThis.__linkedinRequestSolverLoaded = updatePanel;
   updatePanel();
   let recovery;
   try { recovery = JSON.parse(sessionStorage.getItem(recoveryKey)); } catch { /* Ignore malformed page storage. */ }

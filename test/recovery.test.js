@@ -4,7 +4,7 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 const content = fs.readFileSync(require.resolve('../src/content.js'), 'utf8');
 
-function page(storage, { template = null, game = {}, path = '/games/wend/' } = {}) {
+function page(storage, { template = null, game = {}, path = '/games/wend/', unresponsive = false, embedded = false } = {}) {
   const status = { dataset: {} };
   const button = { addEventListener(_name, handler) { this.click = handler; } };
   const nodes = { '.lls__status': status, '.lls__solve': button, '.lls__title': {},
@@ -13,22 +13,25 @@ function page(storage, { template = null, game = {}, path = '/games/wend/' } = {
   const state = { reloads: 0, saves: 0, won: false };
   const location = { pathname: path, href: 'https://www.linkedin.com' + path,
     reload() { state.reloads++; } };
-  vm.runInNewContext(content, {
+  const context = vm.createContext({
     window: {}, location, Date, AbortSignal,
     sessionStorage: { getItem: key => storage.get(key) || null,
       setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
     document: { cookie: 'JSESSIONID="test"', createElement: () => panel,
-      documentElement: { appendChild() {} }, querySelector: () => null,
-      querySelectorAll: selector => selector === 'a,button' && state.won
-        ? [{ textContent: 'See results', closest: () => null }] : [] },
+      documentElement: { appendChild() { panel.isConnected = true; } }, querySelector: () => null,
+      querySelectorAll: selector => embedded
+        ? (selector === 'iframe' ? [{ contentDocument: { querySelectorAll: inner => inner === 'a,button' && state.won
+          ? [{ textContent: 'See results', closest: () => null }] : [] } }] : [])
+        : selector === 'a,button' && state.won ? [{ textContent: 'See results', closest: () => null }] : [] },
     chrome: { runtime: { getManifest: () => ({ version: 'test' }),
-      sendMessage: async ({ type }) => type === 'lls-request-context'
+      sendMessage: async ({ type }) => unresponsive ? new Promise(() => {}) : type === 'lls-request-context'
         ? { ok: true, game, template } : { ok: true } } },
     LinkedInGameRequests: { wendSave: () => ({}), sduiResponse: () => '/games/wend/results/' },
     fetch: async () => { state.saves++; return { ok: true, text: async () => 'accepted' }; },
-    setTimeout: fn => setImmediate(fn), setInterval() {}, clearInterval() {}, addEventListener() {},
+    setTimeout: fn => setImmediate(fn), clearTimeout: clearImmediate, setInterval() {}, clearInterval() {}, addEventListener() {},
   });
-  return { state, status, button };
+  vm.runInContext(content, context);
+  return { state, status, button, panel, context };
 }
 async function settle() { for (let i = 0; i < 150; i++) await new Promise(setImmediate); }
 
@@ -68,4 +71,31 @@ test('recovery cannot resume on another game or from an expired marker', async (
     assert.equal(current.state.saves, 0);
     assert.equal(storage.has('llsRequestRecovery'), false);
   }
+});
+
+test('an unresponsive extension produces an actionable error and re-enables Solve', async () => {
+  const current = page(new Map(), { unresponsive: true });
+  current.button.click();
+  await settle();
+  assert.match(current.status.textContent, /taking too long/);
+  assert.equal(current.button.disabled, false);
+  assert.equal(current.state.saves, 0);
+});
+
+test('persisted completion is recognized inside LinkedIn’s same-origin preload frame', async () => {
+  const storage = new Map([['llsPendingRequest', JSON.stringify({ game: 'wend', path: '/games/wend/', savedAt: Date.now() })]]);
+  const current = page(storage, { embedded: true });
+  current.state.won = true;
+  await settle();
+  assert.equal(current.status.textContent, 'Solved by request. Verified after reload.');
+  assert.equal(current.state.saves, 0);
+});
+
+test('reinjection restores a detached panel without duplicating it', () => {
+  const current = page(new Map());
+  current.panel.isConnected = false;
+  vm.runInContext(content, current.context);
+  assert.equal(current.panel.isConnected, true);
+  assert.equal(current.state.reloads, 0);
+  assert.equal(current.state.saves, 0);
 });

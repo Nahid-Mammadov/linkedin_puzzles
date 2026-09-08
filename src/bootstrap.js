@@ -13,8 +13,8 @@
     });
   }
 
-  const isWordGame = /^\/games\/(?:view\/)?(?:pinpoint|crossclimb|wend)(?:\/|$)/.test(location.pathname);
-  if (!isWordGame) return;
+  const needsRetainedData = /^\/games\/(?:view\/)?(?:pinpoint|crossclimb|wend|mini-sudoku)(?:\/|$)/.test(location.pathname);
+  if (!needsRetainedData) return;
 
   const sources = [];
   const seen = new Set();
@@ -25,6 +25,7 @@
     "pinpointGamePuzzle",
     "crossClimbGamePuzzle",
     "wendGamePuzzle",
+    "miniSudokuGamePuzzle",
     '"solutions"',
     '"solution"',
     '"answer"',

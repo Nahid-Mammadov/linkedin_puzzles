@@ -211,11 +211,17 @@ function syncPuzzleRoute(tabId, url) {
 }
 
 function capturePagePuzzleSource() {
+  // LinkedIn can render Voyager games in its same-origin preload iframe.
+  const embedded = [...document.querySelectorAll("script,code")]
+    .map(el => el.textContent || "")
+    .filter(text => text.length <= 4 * 1024 * 1024
+      && /miniSudokuGamePuzzle|blueprintGamePuzzle|pinpointGamePuzzle|crossClimbGamePuzzle/.test(text));
+  if (embedded.length) return embedded.slice(0, 6).join("\n");
   const reactKeyPattern = /^__react(?:Props|Fiber)\$/;
-  const gamePuzzleKeyPattern = /blueprintGamePuzzle|pinpointGamePuzzle|crossClimbGamePuzzle|wendGamePuzzle|solutionWords|puzzleLetters|rungs/;
+  const gamePuzzleKeyPattern = /blueprintGamePuzzle|pinpointGamePuzzle|crossClimbGamePuzzle|miniSudokuGamePuzzle|wendGamePuzzle|solutionWords|puzzleLetters|rungs/;
   const answerKeyPattern = /solutions?|answer|category/;
   const clueKeyPattern = /clues?/;
-  const puzzleSourcePattern = /blueprintGamePuzzle|pinpointGamePuzzle|crossClimbGamePuzzle|wendGamePuzzle|"solutions?"\s*:|"answer"\s*:|solutionWords|puzzleLetters|rungs/;
+  const puzzleSourcePattern = /blueprintGamePuzzle|pinpointGamePuzzle|crossClimbGamePuzzle|miniSudokuGamePuzzle|wendGamePuzzle|"solutions?"\s*:|"answer"\s*:|solutionWords|puzzleLetters|rungs/;
   const MAX_SCAN_ELEMENTS = 4000;
   const MAX_INSPECTED = 40000;
   const MAX_SCAN_DEPTH = 64;
@@ -390,7 +396,7 @@ async function primeCapture(tabId, url) {
 
 function rememberPuzzleSource(tabId, text) {
   if (typeof text !== "string" || text.length > 4 * 1024 * 1024) return;
-  const matched = text.match(/blueprintGamePuzzle|pinpointGamePuzzle|crossClimbGamePuzzle|wendGamePuzzle|"solutions?"\s*:|"answer"\s*:|solutionWords|puzzleLetters|rungs/);
+  const matched = text.match(/blueprintGamePuzzle|pinpointGamePuzzle|crossClimbGamePuzzle|miniSudokuGamePuzzle|wendGamePuzzle|"solutions?"\s*:|"answer"\s*:|solutionWords|puzzleLetters|rungs/);
   if (!matched) return;
   debug("puzzle source", tabId, "len", text.length, "marker", matched[0]);
   const cutoff = Date.now() - 15 * 60 * 1000;
@@ -457,16 +463,15 @@ async function handleMessage(message, sender) {
     if (Date.now() - lastPageScan >= 750) {
       pageScanTimes.set(tabId, Date.now());
       try {
-        const frameId = Number.isInteger(sender.frameId) ? sender.frameId : 0;
         debug("sources scan begin", tabId);
         const results = await chrome.scripting.executeScript({
-          target: { tabId, frameIds: [frameId] },
+          target: { tabId, allFrames: true },
           world: "MAIN",
           func: capturePagePuzzleSource,
         });
         debug("sources scan done", tabId, (results || []).length);
         for (const result of results || []) {
-          if (result?.result && !/blueprintGamePuzzle|pinpointGamePuzzle|crossClimbGamePuzzle|wendGamePuzzle|solutionWords|puzzleLetters|rungs/.test(result.result)) {
+          if (result?.result && !/blueprintGamePuzzle|pinpointGamePuzzle|crossClimbGamePuzzle|miniSudokuGamePuzzle|wendGamePuzzle|solutionWords|puzzleLetters|rungs/.test(result.result)) {
             debug("scan peek", tabId, String(result.result).slice(0, 220));
           }
           rememberPuzzleSource(tabId, result.result);
@@ -645,6 +650,15 @@ chrome.tabs?.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (/^https:\/\/www\.linkedin\.com\/games\//.test(url)) {
     syncPuzzleRoute(tabId, url);
     if (/^https:\/\/www\.linkedin\.com\/games\/(?:view\/)?(?:pinpoint|crossclimb|wend|queens|tango|zip|patches|mini-sudoku)(?:\/|[?#]|$)/.test(url)) {
+      // Content-script URL matches do not run on feed → game SPA navigation.
+      if (changeInfo.url) {
+        void chrome.scripting.executeScript({
+          target: { tabId },
+          files: ["src/bootstrap.js", "src/parsers.js", "src/requests.js", "src/content.js"],
+        }).then(() => chrome.scripting.insertCSS({
+          target: { tabId }, files: ["src/content.css"],
+        })).catch(() => { /* The tab may navigate again before injection. */ });
+      }
       // Keep network capture attached for the game visit: the
       // one-shot puzzle response can arrive at any navigation on the route.
       void primeCapture(tabId, url).catch(() => {
