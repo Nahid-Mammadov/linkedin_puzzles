@@ -261,6 +261,16 @@
     try { report.textContent = JSON.stringify((await message("lls-debug-requests", { all: true })).requests, null, 2); }
     catch (error) { report.textContent = error.message; }
   });
+  // Extension-internal control for the dedicated headless service. No page-world
+  // event bridge or externally_connectable permission is exposed.
+  chrome.runtime.onMessage?.addListener((message, sender, respond) => {
+    if (sender.id !== chrome.runtime.id || !/^lls-service-(state|solve)$/.test(message?.type || "")) return;
+    const game = currentGame();
+    if (!games[game] || message.game !== game) return;
+    if (message.type === "lls-service-solve") void solve();
+    respond({ game, solving, completed: completed(), phase: status.dataset.state || "idle",
+      message: status.textContent, version: chrome.runtime.getManifest().version });
+  });
   globalThis.__linkedinRequestSolverLoaded = updatePanel;
   updatePanel();
   let recovery;

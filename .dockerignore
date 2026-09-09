@@ -1,0 +1,8 @@
+*
+!manifest.json
+!src/
+!src/**
+!service/
+!service/**
+service/node_modules
+service/data

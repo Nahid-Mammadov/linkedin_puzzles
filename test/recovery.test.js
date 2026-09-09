@@ -13,6 +13,7 @@ function page(storage, { template = null, game = {}, path = '/games/wend/', unre
   const state = { reloads: 0, saves: 0, won: false };
   const location = { pathname: path, href: 'https://www.linkedin.com' + path,
     reload() { state.reloads++; } };
+  let serviceMessage;
   const context = vm.createContext({
     window: {}, location, Date, AbortSignal,
     sessionStorage: { getItem: key => storage.get(key) || null,
@@ -23,7 +24,7 @@ function page(storage, { template = null, game = {}, path = '/games/wend/', unre
         ? (selector === 'iframe' ? [{ contentDocument: { querySelectorAll: inner => inner === 'a,button' && state.won
           ? [{ textContent: 'See results', closest: () => null }] : [] } }] : [])
         : selector === 'a,button' && state.won ? [{ textContent: 'See results', closest: () => null }] : [] },
-    chrome: { runtime: { getManifest: () => ({ version: 'test' }),
+    chrome: { runtime: { id: 'test-extension', onMessage: { addListener(fn) { serviceMessage = fn; } }, getManifest: () => ({ version: 'test' }),
       sendMessage: async ({ type }) => unresponsive ? new Promise(() => {}) : type === 'lls-request-context'
         ? { ok: true, game, template } : { ok: true } } },
     LinkedInGameRequests: { wendSave: () => ({}), sduiResponse: () => '/games/wend/results/' },
@@ -31,7 +32,7 @@ function page(storage, { template = null, game = {}, path = '/games/wend/', unre
     setTimeout: fn => setImmediate(fn), clearTimeout: clearImmediate, setInterval() {}, clearInterval() {}, addEventListener() {},
   });
   vm.runInContext(content, context);
-  return { state, status, button, panel, context };
+  return { state, status, button, panel, context, serviceMessage };
 }
 async function settle() { for (let i = 0; i < 150; i++) await new Promise(setImmediate); }
 
@@ -98,4 +99,19 @@ test('reinjection restores a detached panel without duplicating it', () => {
   assert.equal(current.panel.isConnected, true);
   assert.equal(current.state.reloads, 0);
   assert.equal(current.state.saves, 0);
+});
+
+test('service control accepts only this extension and the matching game', async () => {
+  const current = page(new Map(), { template: {} });
+  let replies = 0;
+  const respond = () => replies++;
+  current.serviceMessage({ type: 'lls-service-solve', game: 'wend' }, { id: 'other-extension' }, respond);
+  current.serviceMessage({ type: 'lls-service-solve', game: 'queens' }, { id: 'test-extension' }, respond);
+  await settle();
+  assert.equal(replies, 0);
+  assert.equal(current.state.saves, 0);
+  current.serviceMessage({ type: 'lls-service-solve', game: 'wend' }, { id: 'test-extension' }, respond);
+  await settle();
+  assert.equal(replies, 1);
+  assert.equal(current.state.saves, 1);
 });

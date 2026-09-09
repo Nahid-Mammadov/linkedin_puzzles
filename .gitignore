@@ -1,3 +1,5 @@
 dist/
 .mimosa/
 .DS_Store
+node_modules/
+service/data/

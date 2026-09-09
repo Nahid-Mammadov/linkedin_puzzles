@@ -1,0 +1,14 @@
+#!/bin/bash
+set -euo pipefail
+cd "$(dirname "$0")"
+case "${1:-status}" in
+  build) docker compose build solver ;;
+  run) docker compose run --rm -T solver run ;;
+  login) docker compose up -d login; echo 'Forward with: ssh -N -L 6080:127.0.0.1:6080 yufeihl'; echo 'Open http://localhost:6080/vnc.html?autoconnect=1&resize=scale';;
+  login-stop) docker compose stop login ;;
+  login-logs) docker compose logs --tail 30 login ;;
+  status) docker compose run --rm -T solver status; systemctl --user list-timers linkedin-puzzles.timer --no-pager ;;
+  logs) journalctl --user -u linkedin-puzzles.service -n 60 --no-pager ;;
+  smoke) docker compose run --rm -T -e DATA_DIR=/tmp/puzzles-smoke -e HOME=/tmp/puzzles-smoke-home solver smoke ;;
+  *) echo 'Usage: service/puzzles build|run|login|login-stop|login-logs|status|logs|smoke' >&2; exit 1 ;;
+esac

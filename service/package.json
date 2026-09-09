@@ -1,0 +1,6 @@
+{
+  "name": "linkedin-puzzles-service",
+  "private": true,
+  "version": "0.1.0",
+  "dependencies": { "playwright": "1.63.0" }
+}

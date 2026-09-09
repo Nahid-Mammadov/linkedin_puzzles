@@ -14,6 +14,10 @@ If puzzle data is present but no native save has been captured, the extension as
 
 v0.7.3 was verified using only native Chrome controls on an initially unsolved Tango board: capture was empty before solving, the tab remained visible, and the completed board persisted at 0:02 after automatic reload. Zip's daily board had already been completed during diagnosis, so the new trigger was not revalidated on an unsolved Zip board. The trigger relies on LinkedIn's React action-runner structure and fails closed if those relationships change.
 
+## Headless server service
+
+The Docker service runs this extension with a separate LinkedIn profile and a daily **4:30 AM Pacific** timer. It includes an SSH-accessible login window, manual runs, and per-game persisted-completion reports. See [service setup and operations](service/README.md).
+
 ## Request paths
 
 Pinpoint, Crossclimb, and Mini Sudoku use Voyager's game-save mutation with the exact game URN supplied by the page, including negative tutorial puzzle ids. A successful response must identify that same resource.

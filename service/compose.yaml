@@ -1,0 +1,24 @@
+name: linkedin-puzzles
+x-common: &common
+  image: linkedin-puzzles-service:local
+  build:
+    context: ..
+    dockerfile: service/Dockerfile
+  init: true
+  shm_size: 1gb
+  volumes:
+    - ./data:/data
+  environment:
+    TZ: America/Los_Angeles
+  security_opt:
+    - no-new-privileges:true
+  stop_grace_period: 30s
+services:
+  solver:
+    <<: *common
+    command: run
+  login:
+    <<: *common
+    command: login
+    ports:
+      - "127.0.0.1:6080:6080"

@@ -30,3 +30,12 @@ jobs:
         with:
           name: linkedin-puzzle-solver
           path: dist/*.zip
+
+  headless-service-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build headless service
+        run: docker build -f service/Dockerfile -t linkedin-puzzles-service:test .
+      - name: Verify request save and persisted completion with offline fixtures
+        run: docker run --rm --init --shm-size=1g linkedin-puzzles-service:test smoke
